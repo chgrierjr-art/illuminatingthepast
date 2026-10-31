@@ -23,6 +23,15 @@
     <canvas id="ghost"></canvas>
   </div>
 
+  <!-- Walkthrough Active Floating HUD -->
+  <div id="walkthroughHud" class="panel" hidden>
+    <div class="wt-hud-info">
+      <span class="badge">Walkthrough Tour</span>
+      <span id="wtStepLabel">Step 1 of 1</span>
+    </div>
+    <button class="btn primary sm" id="hudExploreBtn">Explore on your own</button>
+  </div>
+
   <header id="top">
     <div class="panel" id="homeWrap"><button class="icon" id="homeBtn" aria-label="Projects Home" title="Projects Home" data-ic="home"></button></div>
     <div class="panel"><button class="icon" id="railBtn" aria-label="Show or hide scenes" aria-pressed="true" data-ic="layers"></button></div>
@@ -35,6 +44,9 @@
       <input type="range" id="dialSlider" min="0" max="1" step="0.001" value="0" aria-label="Alternate scene transition slider">
       <span id="dialR" class="dial-lbl">Alternative</span>
     </div>
+
+    <!-- Save Project for Public Viewing -->
+    <div class="panel" id="saveWrap"><button class="btn primary sm" id="saveBtn" title="Save Project for Public Viewing"><span data-ic="save"></span> Save</button></div>
 
     <div class="panel"><button class="icon" id="mapPopoutBtn" aria-label="Overhead Map" title="Overhead Map" data-ic="map"></button></div>
     <div class="panel"><button class="icon" id="shareBtn" aria-label="Share Tour" title="Share Tour" data-ic="share"></button></div>
@@ -49,9 +61,16 @@
     <button id="importBtn">+ Import 360</button>
   </nav>
 
-  <!-- Right Drawer / Inspector Panel -->
+  <!-- Right Drawer / Inspector Panel with Navigation Tabs -->
   <div id="side">
-    <aside id="insp" class="panel" aria-label="Scene settings"></aside>
+    <aside id="insp" class="panel" aria-label="Inspector Panel">
+      <div class="insp-tabs" id="inspTabs">
+        <button class="insp-tab-btn active" data-tab="scene">Scene</button>
+        <button class="insp-tab-btn" data-tab="walkthrough">Walkthrough</button>
+        <button class="insp-tab-btn" data-tab="markers">Marker Pool</button>
+      </div>
+      <div id="inspBody"></div>
+    </aside>
   </div>
 
   <!-- Overhead Map Popout Side Panel -->
@@ -83,13 +102,16 @@
     <button class="icon" id="muteBtn" aria-label="Unmute"></button>
   </div>
 
-  <!-- Full Screen Start Screen Overlay -->
+  <!-- Full Screen Start Screen Overlay (Dual Mode Options) -->
   <div id="startScreen" class="overlay-modal full-start" hidden>
     <div class="start-content">
       <div id="startImgWrap" hidden><img id="startImg" alt="Start Screen Image"></div>
       <h1 id="startTitle">Welcome to the Tour</h1>
       <p id="startDesc"></p>
-      <button class="btn primary lg" id="startTourBtn">Begin Tour</button>
+      <div class="row modal-choice-row">
+        <button class="btn primary lg" id="startWalkthroughTourBtn">Walkthrough Tour</button>
+        <button class="btn lg" id="startExploreTourBtn">Explore on your own</button>
+      </div>
     </div>
   </div>
 
@@ -115,7 +137,7 @@
         <h2>Share Presentation Link</h2>
         <button class="icon" id="closeShareBtn" data-ic="x"></button>
       </div>
-      <p>This view-only link allows others to view the presentation starting from the first scene without editing capabilities.</p>
+      <p>This link opens the presentation mode with choices for both guided Walkthrough mode and self-paced Exploration.</p>
       <div class="row">
         <input type="text" id="shareUrl" class="fld" readonly>
         <button class="btn primary" id="copyShareBtn">Copy Link</button>

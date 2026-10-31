@@ -40,10 +40,10 @@ button{font:inherit;color:inherit}
 .l{display:block;margin:0 0 6px;font:500 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .fld{width:100%;background:var(--soft);border:1px solid #000000;color:var(--fg);border-radius:4px;padding:7px 9px;font:inherit;min-width:0}
 .fld:hover,.fld:focus{background:var(--soft-hi);outline:none;border-color:var(--accent)}
-.btn{height:32px;padding:0 12px;border-radius:4px;border:1px solid #000000;background:var(--soft);color:var(--fg);cursor:pointer;font-weight:500;white-space:nowrap}
+.btn{height:32px;padding:0 12px;border-radius:4px;border:1px solid #000000;background:var(--soft);color:var(--fg);cursor:pointer;font-weight:500;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .btn:hover{background:var(--soft-hi)}
-.btn.sm{height:26px;padding:0 9px;font-size:12.5px}
-.btn.lg{height:44px;padding:0 28px;font-size:16px;font-weight:600}
+.btn.sm{height:32px;padding:0 10px;font-size:12.5px}
+.btn.lg{height:44px;padding:0 24px;font-size:15px;font-weight:600}
 .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .btn.primary:hover{background:#3fa0c7}
 .btn.danger{color:var(--danger);border-color:var(--danger)}
@@ -55,12 +55,16 @@ button{font:inherit;color:inherit}
 .seg button:hover{background:var(--soft)}
 .seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
 
+/* Walkthrough HUD Control Bar */
+#walkthroughHud{position:absolute;top:68px;left:50%;transform:translateX(-50%);z-index:9;display:flex;align-items:center;gap:16px;padding:8px 16px;border:1px solid var(--accent);box-shadow:0 4px 16px rgba(0,0,0,0.85)}
+.wt-hud-info{display:flex;align-items:center;gap:10px;font-weight:500}
+
 /* Alternate Scene Transition Slider */
 .dial-slider-wrap{display:flex;align-items:center;gap:10px;padding:4px 12px;height:38px;background:var(--panel);border:1px solid #000000}
 .dial-lbl{font:500 12px var(--ui);color:var(--fg);white-space:nowrap}
 #dialSlider{width:120px;height:18px;accent-color:var(--accent);cursor:pointer;margin:0}
 
-/* Hotspots (Icon Only by Default, Hover Card) */
+/* Hotspots */
 .hsp{position:absolute;left:0;top:0;pointer-events:auto;display:flex;flex-direction:column;align-items:center;background:none;border:0;padding:0;color:var(--fg);cursor:grab;will-change:transform}
 .hsp:active{cursor:grabbing}
 .hsp .dot{position:relative;width:38px;height:38px;flex:none;border-radius:50%;background:#000000;color:var(--accent);display:grid;place-items:center;border:1px solid var(--accent);box-shadow:0 2px 8px rgba(0,0,0,.6);transition:transform .15s,box-shadow .15s}
@@ -114,14 +118,20 @@ button{font:inherit;color:inherit}
 #importBtn{margin:0 8px 8px;height:34px;border-radius:4px;border:1px dashed var(--accent);background:none;color:var(--fg);cursor:pointer;font-weight:500}
 #importBtn:hover{background:var(--soft)}
 
-/* right column: settings inspector */
-#side{position:absolute;z-index:4;right:var(--gr);top:60px;bottom:16px;width:290px;display:none;flex-direction:column;gap:10px;pointer-events:none}
+/* right column: settings inspector with tabs */
+#side{position:absolute;z-index:4;right:var(--gr);top:60px;bottom:16px;width:320px;display:none;flex-direction:column;gap:10px;pointer-events:none}
 #app.side-on #side{display:flex}
 #side>*{pointer-events:auto}
-#insp{flex:1;min-height:0;overflow:auto;display:none}
-#app.edit.insp-open #insp{display:block}
+#insp{flex:1;min-height:0;overflow:hidden;display:none;flex-direction:column}
+#app.edit.insp-open #insp{display:flex}
 
-/* Overhead Map Popout Panel (Responsive Image Scaling in Mini & 80% Modes) */
+.insp-tabs{display:flex;border-bottom:1px solid #000;background:var(--soft)}
+.insp-tab-btn{flex:1;padding:8px 4px;font:500 12px var(--ui);background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);cursor:pointer;text-align:center}
+.insp-tab-btn:hover{color:var(--fg)}
+.insp-tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--panel)}
+#inspBody{flex:1;overflow:auto}
+
+/* Overhead Map Popout Panel */
 #mapPopout{position:absolute;z-index:6;right:var(--gr);top:60px;width:300px;display:flex;flex-direction:column;background:var(--panel);border:1px solid #000000;box-shadow:0 4px 20px rgba(0,0,0,0.9);transition:width .25s ease, height .25s ease, top .25s ease, right .25s ease}
 #mapPopout.enlarged{position:fixed;top:10vh!important;right:10vw!important;width:80vw!important;height:80vh!important;z-index:100;box-shadow:0 0 40px rgba(0,0,0,0.95)}
 .map-h{display:flex;align-items:center;gap:4px;padding:8px 8px 8px 12px;border-bottom:1px solid #000000;flex:none}
@@ -162,6 +172,13 @@ button{font:inherit;color:inherit}
 .empty-h{color:var(--muted);font-size:12.5px;margin:0}
 .badge{display:inline-block;font:500 11px var(--mono);background:var(--accent-soft);color:var(--accent);padding:2px 7px;border-radius:3px}
 
+/* Walkthrough Step List Styling */
+.wt-step-card{background:var(--soft);border:1px solid #000;border-radius:4px;padding:10px;margin-bottom:10px}
+.wt-step-card.active-step{border-color:var(--accent)}
+.wt-step-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.wt-step-title{font-weight:600;font-size:13px;color:var(--accent)}
+.wt-step-actions{display:flex;gap:4px}
+
 /* compare slider */
 #cmp{position:absolute;top:0;bottom:0;left:50%;width:0;z-index:2;pointer-events:none}
 #cmp .cl{position:absolute;top:0;bottom:0;left:-1px;width:2px;background:var(--accent);box-shadow:0 0 0 1px rgba(0,0,0,.5)}
@@ -187,10 +204,11 @@ button{font:inherit;color:inherit}
 /* Full Screen Start Menu */
 .full-start{background:#000000!important;padding:0!important}
 .start-content{width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;text-align:center;box-sizing:border-box}
-.start-content #startImgWrap{width:100%;max-width:860px;max-height:55vh;margin-bottom:28px;overflow:hidden;border-radius:6px;border:1px solid var(--accent)}
+.start-content #startImgWrap{width:100%;max-width:860px;max-height:50vh;margin-bottom:24px;overflow:hidden;border-radius:6px;border:1px solid var(--accent)}
 .start-content img{width:100%;height:100%;object-fit:cover;display:block}
 .start-content h1{margin:0 0 12px;font-size:32px;color:var(--accent);font-weight:600}
 .start-content p{color:var(--muted);font-size:16px;max-width:640px;margin:0 0 28px;line-height:1.5}
+.modal-choice-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
 
 /* Projects Home Modal */
 .home-card{max-width:560px;width:100%;padding:20px;display:flex;flex-direction:column;max-height:80vh}
@@ -213,6 +231,7 @@ button{font:inherit;color:inherit}
 
 /* View-Only / Presentation Mode CSS Overrides */
 body.view-only #homeWrap,
+body.view-only #saveWrap,
 body.view-only #inspWrap,
 body.view-only #modeSeg,
 body.view-only #importBtn,
@@ -240,7 +259,7 @@ body.view-only #tourName {
   #railList{flex-direction:row;padding:8px;flex:1}
   .sc{width:128px}
   #importBtn{margin:8px 8px 8px 0;flex:none;width:84px;height:auto;padding:0 6px;font-size:12px}
-  #side{width:min(280px,calc(100% - var(--gl) - var(--gr)));bottom:210px}
+  #side{width:min(300px,calc(100% - var(--gl) - var(--gr)));bottom:210px}
   #mapPopout{width:280px;top:100px}
   #app:not(.rail-open) #side{bottom:92px}
   #app.edit.insp-open #side{left:var(--gl);width:auto}

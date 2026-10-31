@@ -27,7 +27,8 @@ var IC={
   share:'<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
   pin:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>',
   home:'<path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
-  expand:'<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>'
+  expand:'<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+  save:'<path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>'
 };
 function svg(n,s){s=s||18;return '<svg viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(IC[n]||'')+'</svg>'}
 document.querySelectorAll('[data-ic]').forEach(function(e){e.innerHTML=svg(e.dataset.ic)});
@@ -35,9 +36,10 @@ $('#cmpH').innerHTML=svg('lr',20);
 
 /* ---------- state ---------- */
 var S={projectId:null,name:'Untitled tour',media:new Map(),scenes:[],active:null,mode:'edit',adding:false,addingMarker:false,sel:null,
-  playing:true,muted:true,demo:false,railOpen:true,inspOpen:window.innerWidth>900,mapPopoutOpen:false,mapEnlarged:false,
+  playing:true,muted:true,demo:false,railOpen:true,inspOpen:window.innerWidth>900,inspTab:'scene',mapPopoutOpen:false,mapEnlarged:false,
   dial:0,altNames:['Primary','Alternative'],map:null,placing:null,busy:false,pendingMap:false,viewOnly:false,
-  startScreen:{enabled:false,imgUrl:null,title:'Welcome to the Tour',desc:''}};
+  startScreen:{enabled:false,imgUrl:null,title:'Welcome to the Tour',desc:''},
+  markerPool:[], walkthrough:[], walkthroughActive:false, walkthroughStep:0};
 
 var app=$('#app'),stage=$('#stage'),canvas=$('#gl'),hsBox=$('#hs'),ghost=$('#ghost'),gctx=ghost.getContext('2d');
 var uid=function(){return Math.random().toString(36).slice(2,9)};
@@ -326,17 +328,13 @@ function fadeGhost(ms,scale){
   ghost.style.transition='opacity '+ms+'ms ease,transform '+ms+'ms ease';
   ghost.style.opacity='0';ghost.style.transform='scale('+(scale||1.05)+')';
 }
-function crossfade(fn,ms){
-  if(REDUCED||!S.active){fn();return Promise.resolve()}
-  return snapshot().then(function(ok){fn();if(ok)fadeGhost(ms||650,1.04)});
-}
 function tween(ms,fn,tok){
   return new Promise(function(res){
     var t0=performance.now();
     (function step(){
       var p=Math.min(1,(performance.now()-t0)/ms);
       fn(p);
-      if(tok!==navTok){res(false);return}
+      if(tok!==navTok && tok!==undefined){res(false);return}
       if(p<1)requestAnimationFrame(step);else res(true);
     })();
   });
@@ -390,7 +388,7 @@ $('#dialSlider').addEventListener('input', function(e){
   setDial(parseFloat(e.target.value));
 });
 
-/* ---------- hotspots & markers UI & dragging in edit mode ---------- */
+/* ---------- hotspots & markers UI & dragging ---------- */
 var hsEls=new Map();
 var dragItem=null;
 
@@ -422,11 +420,15 @@ function buildHotspotsAndMarkers(){
   });
 
   (sc.markers||[]).forEach(function(m){
+    var poolItem = S.markerPool.find(p => p.id === m.poolId) || m;
+    var name = poolItem.name || m.name || 'Marker';
+    var desc = poolItem.desc || m.desc || '';
+
     var b=document.createElement('button');
     b.className='mrk'+(m.id===S.sel?' sel':'');
-    var descHtml=m.desc?'<span class="desc-drop">'+esc(m.desc)+'</span>':'<span class="desc-drop">No description provided.</span>';
-    b.innerHTML='<span class="dot">'+svg('pin',16)+'</span><div class="card-hover"><span class="nm">'+esc(m.name||'Marker')+'</span><span class="sub">click for details</span>'+descHtml+'</div>';
-    b.setAttribute('aria-label','Marker: '+(m.name||'Info'));
+    var descHtml=desc?'<span class="desc-drop">'+esc(desc)+'</span>':'<span class="desc-drop">No description provided.</span>';
+    b.innerHTML='<span class="dot">'+svg('pin',16)+'</span><div class="card-hover"><span class="nm">'+esc(name)+'</span><span class="sub">click for details</span>'+descHtml+'</div>';
+    b.setAttribute('aria-label','Marker: '+name);
     b._h=m;b._kind='marker';
 
     attachDragHandler(b, m);
@@ -443,9 +445,9 @@ function buildHotspotsAndMarkers(){
 
 function attachDragHandler(el, item){
   el.addEventListener('pointerdown', function(e){
+    e.stopPropagation();
     if(S.mode !== 'edit' || S.viewOnly) return;
     if(e.button !== 0) return;
-    e.stopPropagation();
     try{el.setPointerCapture(e.pointerId)}catch(_){}
     dragItem = {el: el, item: item, x: e.clientX, y: e.clientY, moved: false, id: e.pointerId};
   });
@@ -522,11 +524,16 @@ function placeMarker(cx,cy){
   var r=canvas.getBoundingClientRect();
   var nx=((cx-r.left)/r.width)*2-1,ny=-((cy-r.top)/r.height)*2+1;
   var v=new THREE.Vector3(nx,ny,.5).unproject(camera).sub(camera.position).normalize();
-  var m={id:uid(),lon:Math.atan2(v.z,v.x)*R2D,lat:Math.asin(clamp(v.y,-1,1))*R2D,name:'Point of Interest',desc:''};
+  
+  var poolId = uid();
+  var pItem = {id: poolId, name: 'Point of Interest', desc: ''};
+  S.markerPool.push(pItem);
+
+  var m={id:uid(), poolId: poolId, lon:Math.atan2(v.z,v.x)*R2D, lat:Math.asin(clamp(v.y,-1,1))*R2D};
   if(!sc.markers)sc.markers=[];
   sc.markers.push(m);S.sel=m.id;S.addingMarker=false;S.inspOpen=true;
   buildHotspotsAndMarkers();renderInsp();layout();hideHint();save();
-  toast('Marker placed. Enter name & details in settings.');
+  toast('Marker placed & added to pool. Edit details in inspector.');
 }
 
 function cancelAdd(silent){if(!S.adding)return;S.adding=false;layout();hideHint();renderInsp()}
@@ -668,7 +675,16 @@ function moveScene(id, dir){
   save();
 }
 
-/* ---------- inspector ---------- */
+/* ---------- Tabbed Inspector Panel ---------- */
+$('#inspTabs').addEventListener('click', function(e){
+  var btn = e.target.closest('.insp-tab-btn');
+  if(!btn) return;
+  document.querySelectorAll('.insp-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  S.inspTab = btn.dataset.tab;
+  renderInsp();
+});
+
 function mediaOptions(selId,allowNone){
   var o=allowNone?'<option value=""'+(!selId?' selected':'')+'>None</option>':'';
   S.media.forEach(function(m){o+='<option value="'+m.id+'"'+(m.id===selId?' selected':'')+'>'+esc(m.name)+' ('+(m.kind==='video'?'video':'photo')+')</option>'});
@@ -687,8 +703,18 @@ function slotBlock(slot,label,selId){
 }
 
 function renderInsp(){
-  var el=$('#insp');
+  var el=$('#inspBody');
   if(S.viewOnly){el.innerHTML='';return}
+  if(S.inspTab === 'walkthrough'){
+    renderWalkthroughInsp(el);
+    return;
+  }
+  if(S.inspTab === 'markers'){
+    renderMarkerPoolInsp(el);
+    return;
+  }
+
+  /* Scene Settings Tab */
   var sc=curScene();
   if(!sc){el.innerHTML='<div class="sec"><p class="empty-h">Import a scene to edit its settings.</p></div>';return}
   var others=S.scenes.filter(function(s){return s.id!==sc.id});
@@ -704,12 +730,15 @@ function renderInsp(){
       '</div>';
   }).join('');
 
+  var poolOpts = S.markerPool.map(p => '<option value="'+p.id+'">'+esc(p.name)+'</option>').join('');
+
   var mrkRows=(sc.markers||[]).map(function(m){
+    var pItem = S.markerPool.find(p => p.id === m.poolId) || {name: m.name||'Marker', desc: m.desc||''};
     return '<div class="hrow'+(m.id===S.sel?' sel':'')+'" data-id="'+m.id+'">'+
       '<div class="hrow-top"><button class="mini mgo" aria-label="Focus marker">'+svg('eye',16)+'</button>'+
-      '<input class="fld mName" placeholder="Marker Name" value="'+esc(m.name||'')+'">'+
+      '<input class="fld mName" placeholder="Marker Name" value="'+esc(pItem.name)+'">' +
       '<button class="mini mdel" aria-label="Delete marker">'+svg('x',16)+'</button></div>'+
-      '<input class="fld mDesc" placeholder="Marker Details / Description" value="'+esc(m.desc||'')+'">'+
+      '<input class="fld mDesc" placeholder="Marker Details / Description" value="'+esc(pItem.desc)+'">'+
       '</div>';
   }).join('');
 
@@ -733,6 +762,10 @@ function renderInsp(){
     ?'<div class="sec"><span class="l">Overhead Map Position</span><div class="row"><button class="btn sm primary" id="placePin" aria-pressed="'+(S.placing===sc.id)+'">'+(sc.mapPos?'Move Pin':'Place on Map')+'</button>'+(sc.mapPos?'<button class="btn sm" id="clearPin">Remove Pin</button>':'')+'</div></div>'
     :'<div class="sec"><span class="l">Overhead Map Position</span><p class="empty-h">Open Overhead Map panel to add a floorplan.</p></div>';
 
+  var addFromPoolSec = S.markerPool.length
+    ? '<div class="row" style="margin-top:6px"><select id="addPoolSelect" class="fld" style="flex:1"><option value="">Select pooled marker...</option>'+poolOpts+'</select><button class="btn sm primary" id="addFromPoolBtn">Add to Scene</button></div>'
+    : '';
+
   var tourSec='<div class="sec">'+(hasAlt?'<span class="l">Dial labels</span><div class="two" style="margin:0 0 12px"><input id="altN0" class="fld" maxlength="18" value="'+esc(S.altNames[0])+'"><input id="altN1" class="fld" maxlength="18" value="'+esc(S.altNames[1])+'"></div>':'')+
     '<div class="row"><button class="btn" id="exportCurrentBtn">Export Project File</button><button class="btn danger" id="delScene">Delete scene</button><button class="btn danger" id="resetTour">Start over</button></div></div>';
 
@@ -748,47 +781,164 @@ function renderInsp(){
     mapSec+
     '<div class="sec"><div class="sec-h"><span class="l">Hotspots (Navigation)</span><button class="btn primary sm" id="addHs" aria-pressed="'+S.adding+'">'+(S.adding?'Cancel':'Add Hotspot')+'</button></div>'+
       (hsRows||'<p class="empty-h">Hotspots link to other scenes.</p>')+'</div>'+
-    '<div class="sec"><div class="sec-h"><span class="l">Markers (Points of Interest)</span><button class="btn primary sm" id="addMrk" aria-pressed="'+S.addingMarker+'">'+(S.addingMarker?'Cancel':'Add Marker')+'</button></div>'+
-      (mrkRows||'<p class="empty-h">Markers highlight details to look at without moving scenes.</p>')+'</div>'+
+    '<div class="sec"><div class="sec-h"><span class="l">Scene Markers</span><button class="btn primary sm" id="addMrk" aria-pressed="'+S.addingMarker+'">'+(S.addingMarker?'Cancel':'Add Marker')+'</button></div>'+
+      (mrkRows||'<p class="empty-h">Markers highlight details to look at.</p>')+addFromPoolSec+'</div>'+
     tourSec;
 }
 
-var insp=$('#insp'),slotTarget=null;
+/* ---------- Walkthrough Editor Tab Rendering ---------- */
+function renderWalkthroughInsp(el){
+  var stepsHtml = S.walkthrough.map((step, idx) => {
+    var sc = getScene(step.sceneId);
+    var sceneName = sc ? sc.name : 'Select Scene';
+    var scOpts = S.scenes.map(s => `<option value="${s.id}" ${s.id === step.sceneId ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
+
+    var poolOpts = '<option value="">None</option>' + S.markerPool.map(p => `<option value="${p.id}" ${p.id === step.markerId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+
+    return `
+      <div class="wt-step-card" data-step-id="${step.id}">
+        <div class="wt-step-h">
+          <span class="wt-step-title">Step ${idx + 1}: ${esc(sceneName)}</span>
+          <div class="wt-step-actions">
+            <button class="mini wt-up" title="Move Up">▲</button>
+            <button class="mini wt-dn" title="Move Down">▼</button>
+            <button class="mini wt-del" title="Delete Step">${svg('x',14)}</button>
+          </div>
+        </div>
+        <div class="slot">
+          <label class="l">Target Scene</label>
+          <select class="fld wt-scene-select">${scOpts}</select>
+        </div>
+        <div class="two">
+          <label>Start Angle (Yaw)
+            <div class="row"><input class="fld wt-start-lon" type="number" value="${Math.round(step.startLon||0)}"><button class="btn sm wt-cap-start">Capture</button></div>
+          </label>
+          <label>End Angle (Yaw)
+            <div class="row"><input class="fld wt-end-lon" type="number" value="${Math.round(step.endLon||0)}"><button class="btn sm wt-cap-end">Capture</button></div>
+          </label>
+        </div>
+        <div class="two" style="margin-top:8px">
+          <label>Pan Duration (sec)
+            <input class="fld wt-pan-dur" type="number" step="0.5" min="0" value="${step.panDuration}">
+          </label>
+          <label>Pause Duration (sec)
+            <input class="fld wt-pause-dur" type="number" step="0.5" min="0" value="${step.pauseDuration}">
+          </label>
+        </div>
+        <div class="slot" style="margin-top:8px">
+          <label class="l">Trigger Pooled Marker</label>
+          <select class="fld wt-marker-select">${poolOpts}</select>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="sec">
+      <div class="sec-h">
+        <span class="l">Guided Walkthrough Path</span>
+        <button class="btn primary sm" id="addWtStepBtn">+ Add Step</button>
+      </div>
+      <p class="note" style="margin-bottom:12px">Define keyframed sequence paths, camera panning, hold durations, and marker popups.</p>
+      ${stepsHtml || '<p class="empty-h">No steps created yet. Click "+ Add Step" to build a walkthrough.</p>'}
+      ${S.walkthrough.length ? '<div class="row" style="margin-top:12px"><button class="btn primary" id="testWalkthroughBtn">Preview Walkthrough</button></div>' : ''}
+    </div>
+  `;
+}
+
+/* ---------- Marker Pool Tab Rendering ---------- */
+function renderMarkerPoolInsp(el){
+  var rows = S.markerPool.map(m => {
+    return `
+      <div class="hrow" data-pool-id="${m.id}">
+        <div class="hrow-top">
+          <input class="fld pool-name" placeholder="Marker Title" value="${esc(m.name)}">
+          <button class="mini pool-del" title="Delete from Pool">${svg('x',16)}</button>
+        </div>
+        <input class="fld pool-desc" placeholder="Global Description / Details" value="${esc(m.desc)}">
+      </div>
+    `;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="sec">
+      <div class="sec-h">
+        <span class="l">Global Marker Pool</span>
+        <button class="btn primary sm" id="addPoolMarkerBtn">+ New Marker</button>
+      </div>
+      <p class="note" style="margin-bottom:12px">Manage all POI markers across the tour for reuse and automated walkthroughs.</p>
+      ${rows || '<p class="empty-h">Marker pool is currently empty.</p>'}
+    </div>
+  `;
+}
+
+var insp=$('#inspBody'),slotTarget=null;
 insp.addEventListener('input',function(e){
   if(S.viewOnly)return;
   var sc=curScene();
-  if(e.target.id==='scName'&&sc){
-    sc.name=e.target.value||'Untitled scene';renderRail();renderMap();save();
-  }else if(e.target.id==='altN0'||e.target.id==='altN1'){
-    var i=e.target.id==='altN0'?0:1;S.altNames[i]=e.target.value||(i?'Alternative':'Primary');renderDial();save();
-  }else if(e.target.id==='startTitleInp'){
-    S.startScreen.title=e.target.value;save();
-  }else if(e.target.id==='startDescInp'){
-    S.startScreen.desc=e.target.value;save();
-  }else if(e.target.classList.contains('hDesc')){
-    var row=e.target.closest('.hrow'),h=sc.hotspots.find(function(x){return x.id===row.dataset.id});
-    if(h){h.desc=e.target.value;buildHotspotsAndMarkers();save()}
-  }else if(e.target.classList.contains('mName')){
-    var row=e.target.closest('.hrow'),m=sc.markers.find(function(x){return x.id===row.dataset.id});
-    if(m){m.name=e.target.value;buildHotspotsAndMarkers();save()}
-  }else if(e.target.classList.contains('mDesc')){
-    var row=e.target.closest('.hrow'),m=sc.markers.find(function(x){return x.id===row.dataset.id});
-    if(m){m.desc=e.target.value;buildHotspotsAndMarkers();save()}
+  var t=e.target;
+
+  if(t.id==='scName'&&sc){
+    sc.name=t.value||'Untitled scene';renderRail();renderMap();save();
+  }else if(t.id==='altN0'||t.id==='altN1'){
+    var i=t.id==='altN0'?0:1;S.altNames[i]=t.value||(i?'Alternative':'Primary');renderDial();save();
+  }else if(t.id==='startTitleInp'){
+    S.startScreen.title=t.value;save();
+  }else if(t.id==='startDescInp'){
+    S.startScreen.desc=t.value;save();
+  }else if(t.classList.contains('hDesc')){
+    var row=t.closest('.hrow'),h=sc.hotspots.find(function(x){return x.id===row.dataset.id});
+    if(h){h.desc=t.value;buildHotspotsAndMarkers();save()}
+  }else if(t.classList.contains('mName') || t.classList.contains('mDesc')){
+    var row=t.closest('.hrow'),m=sc.markers.find(function(x){return x.id===row.dataset.id});
+    if(m && m.poolId){
+      var pItem = S.markerPool.find(p => p.id === m.poolId);
+      if(pItem){
+        if(t.classList.contains('mName')) pItem.name = t.value;
+        if(t.classList.contains('mDesc')) pItem.desc = t.value;
+        buildHotspotsAndMarkers();save();
+      }
+    }
+  }else if(t.classList.contains('pool-name') || t.classList.contains('pool-desc')){
+    var row=t.closest('.hrow'), pItem=S.markerPool.find(p => p.id === row.dataset.poolId);
+    if(pItem){
+      if(t.classList.contains('pool-name')) pItem.name = t.value;
+      if(t.classList.contains('pool-desc')) pItem.desc = t.value;
+      buildHotspotsAndMarkers();save();
+    }
+  }else if(t.closest('.wt-step-card')){
+    var card = t.closest('.wt-step-card');
+    var step = S.walkthrough.find(s => s.id === card.dataset.stepId);
+    if(step){
+      if(t.classList.contains('wt-start-lon')) step.startLon = parseFloat(t.value)||0;
+      if(t.classList.contains('wt-end-lon')) step.endLon = parseFloat(t.value)||0;
+      if(t.classList.contains('wt-pan-dur')) step.panDuration = parseFloat(t.value)||0;
+      if(t.classList.contains('wt-pause-dur')) step.pauseDuration = parseFloat(t.value)||0;
+      save();
+    }
   }
 });
 
 insp.addEventListener('change',function(e){
   if(S.viewOnly)return;
-  var sc=curScene();if(!sc)return;
+  var sc=curScene();
   var t=e.target;
   if(t.id==='startEnable'){
     S.startScreen.enabled=t.checked;save();
-  }else if(t.id==='selA'||t.id==='selB'){
+  }else if(sc && (t.id==='selA'||t.id==='selB')){
     var v=sc.v[variantIndex(sc)];v[t.dataset.slot]=t.value||null;
     gcMedia();refreshMap();applyAudio();renderRail();renderInsp();save();
-  }else if(t.classList.contains('hT')){
+  }else if(t.classList.contains('hT') && sc){
     var row=t.closest('.hrow'),h=sc.hotspots.find(function(x){return x.id===row.dataset.id});
     if(h){h.target=t.value;buildHotspotsAndMarkers();renderMap();save()}
+  }else if(t.classList.contains('wt-scene-select')){
+    var card = t.closest('.wt-step-card');
+    var step = S.walkthrough.find(s => s.id === card.dataset.stepId);
+    if(step){ step.sceneId = t.value; renderInsp(); save(); }
+  }else if(t.classList.contains('wt-marker-select')){
+    var card = t.closest('.wt-step-card');
+    var step = S.walkthrough.find(s => s.id === card.dataset.stepId);
+    if(step){ step.markerId = t.value; save(); }
   }
 });
 
@@ -800,27 +950,27 @@ function arm(btn,label,fn){
 
 insp.addEventListener('click',function(e){
   if(S.viewOnly)return;
-  var sc=curScene();if(!sc)return;
+  var sc=curScene();
   var t=e.target.closest('button');if(!t)return;
   if(t.id==='uploadStartImgBtn'){$('#fileStartImg').click()}
   else if(t.id==='rmStartImgBtn'){S.startScreen.imgUrl=null;renderInsp();save()}
-  else if(t.id==='setView'){sc.view={lon:lon,lat:lat,fov:fov};renderInsp();save();toast('Start view saved.')}
-  else if(t.classList.contains('slotImp')){slotTarget={sceneId:sc.id,variant:variantIndex(sc),slot:t.dataset.slot};$('#fileSlot').click()}
-  else if(t.id==='mkAlt'){
+  else if(t.id==='setView'&&sc){sc.view={lon:lon,lat:lat,fov:fov};renderInsp();save();toast('Start view saved.')}
+  else if(t.classList.contains('slotImp')&&sc){slotTarget={sceneId:sc.id,variant:variantIndex(sc),slot:t.dataset.slot};$('#fileSlot').click()}
+  else if(t.id==='mkAlt'&&sc){
     var p=sc.v[0];sc.v[1]={a:p.a,b:p.b};
     setDial(1);slotTarget={sceneId:sc.id,variant:1,slot:'a'};$('#fileSlot').click();
     layout();save();
   }
-  else if(t.id==='rmAlt'){arm(t,'Confirm remove',function(){
+  else if(t.id==='rmAlt'&&sc){arm(t,'Confirm remove',function(){
     sc.v[1]=null;if(!S.scenes.some(function(s){return s.v[1]}))S.dial=0;
     gcMedia();refreshMap();applyAudio();renderRail();renderInsp();renderDial();layout();save();
   })}
-  else if(t.id==='placePin'){
+  else if(t.id==='placePin'&&sc){
     if(S.placing===sc.id){S.placing=null;hideHint()}
     else{S.placing=sc.id;S.mapPopoutOpen=true;showHint('Click Overhead Map to place "'+sc.name+'". Press Esc to cancel.')}
     renderMap();renderInsp();layout();
   }
-  else if(t.id==='clearPin'){sc.mapPos=null;renderMap();renderInsp();save()}
+  else if(t.id==='clearPin'&&sc){sc.mapPos=null;renderMap();renderInsp();save()}
   else if(t.id==='addHs'){
     if(S.adding){cancelAdd();return}
     if(S.scenes.length<2){toast('Add a second scene first, then link to it.');return}
@@ -830,23 +980,75 @@ insp.addEventListener('click',function(e){
     if(S.addingMarker){cancelAddMarker();return}
     cancelAdd();S.addingMarker=true;layout();renderInsp();showHint('Click scene to place Marker. Press Esc to cancel.');
   }
-  else if(t.classList.contains('hgo')){
+  else if(t.id==='addFromPoolBtn'&&sc){
+    var poolSel = $('#addPoolSelect');
+    if(poolSel && poolSel.value){
+      var pId = poolSel.value;
+      var m = {id: uid(), poolId: pId, lon: lon, lat: lat};
+      sc.markers.push(m);
+      buildHotspotsAndMarkers(); renderInsp(); save();
+    }
+  }
+  else if(t.classList.contains('hgo')&&sc){
     var h=sc.hotspots.find(function(x){return x.id===t.closest('.hrow').dataset.id});
     if(h){lon=h.lon;lat=h.lat;vlon=vlat=0;S.sel=h.id;markSel()}
   }
-  else if(t.classList.contains('hdel')){
+  else if(t.classList.contains('hdel')&&sc){
     var id=t.closest('.hrow').dataset.id;
     sc.hotspots=sc.hotspots.filter(function(x){return x.id!==id});
     if(S.sel===id)S.sel=null;buildHotspotsAndMarkers();renderInsp();renderMap();save();
   }
-  else if(t.classList.contains('mgo')){
+  else if(t.classList.contains('mgo')&&sc){
     var m=sc.markers.find(function(x){return x.id===t.closest('.hrow').dataset.id});
     if(m){lon=m.lon;lat=m.lat;vlon=vlat=0;S.sel=m.id;markSel()}
   }
-  else if(t.classList.contains('mdel')){
+  else if(t.classList.contains('mdel')&&sc){
     var id=t.closest('.hrow').dataset.id;
     sc.markers=sc.markers.filter(function(x){return x.id!==id});
     if(S.sel===id)S.sel=null;buildHotspotsAndMarkers();renderInsp();save();
+  }
+  else if(t.id==='addPoolMarkerBtn'){
+    S.markerPool.push({id: uid(), name: 'New POI Marker', desc: ''});
+    renderInsp(); save();
+  }
+  else if(t.classList.contains('pool-del')){
+    var pId = t.closest('.hrow').dataset.poolId;
+    S.markerPool = S.markerPool.filter(p => p.id !== pId);
+    renderInsp(); save();
+  }
+  else if(t.id==='addWtStepBtn'){
+    var curId = S.scenes.length ? (sc ? sc.id : S.scenes[0].id) : '';
+    S.walkthrough.push({
+      id: uid(), sceneId: curId, startLon: lon, endLon: lon + 90, panDuration: 5, pauseDuration: 3, markerId: ''
+    });
+    renderInsp(); save();
+  }
+  else if(t.classList.contains('wt-cap-start')){
+    var step = S.walkthrough.find(s => s.id === t.closest('.wt-step-card').dataset.stepId);
+    if(step){ step.startLon = Math.round(lon); renderInsp(); save(); }
+  }
+  else if(t.classList.contains('wt-cap-end')){
+    var step = S.walkthrough.find(s => s.id === t.closest('.wt-step-card').dataset.stepId);
+    if(step){ step.endLon = Math.round(lon); renderInsp(); save(); }
+  }
+  else if(t.classList.contains('wt-del')){
+    var stepId = t.closest('.wt-step-card').dataset.stepId;
+    S.walkthrough = S.walkthrough.filter(s => s.id !== stepId);
+    renderInsp(); save();
+  }
+  else if(t.classList.contains('wt-up') || t.classList.contains('wt-dn')){
+    var stepId = t.closest('.wt-step-card').dataset.stepId;
+    var idx = S.walkthrough.findIndex(s => s.id === stepId);
+    var dir = t.classList.contains('wt-up') ? -1 : 1;
+    if(idx + dir >= 0 && idx + dir < S.walkthrough.length){
+      var tmp = S.walkthrough[idx];
+      S.walkthrough[idx] = S.walkthrough[idx+dir];
+      S.walkthrough[idx+dir] = tmp;
+      renderInsp(); save();
+    }
+  }
+  else if(t.id==='testWalkthroughBtn'){
+    startWalkthrough();
   }
   else if(t.id==='exportCurrentBtn'){ exportProject(S.projectId); }
   else if(t.id==='delScene'){arm(t,'Confirm delete',deleteScene)}
@@ -878,7 +1080,7 @@ function deleteScene(){
 function resetTour(keepMap){
   stopDemo();
   Array.from(S.media.values()).forEach(dropMedia);
-  S.scenes=[];S.active=null;S.demo=false;S.name='Untitled tour';S.sel=null;S.dial=0;S.altNames=['Primary','Alternative'];S.placing=null;navTok++;S.busy=false;
+  S.scenes=[];S.markerPool=[];S.walkthrough=[];S.active=null;S.demo=false;S.name='Untitled tour';S.sel=null;S.dial=0;S.altNames=['Primary','Alternative'];S.placing=null;navTok++;S.busy=false;
   S.startScreen={enabled:false,imgUrl:null,title:'Welcome to the Tour',desc:''};
   if(!(keepMap&&S.map&&!S.map.demo)){
     if(S.map&&S.map.url&&S.map.url.indexOf('blob:')===0)URL.revokeObjectURL(S.map.url);
@@ -887,6 +1089,76 @@ function resetTour(keepMap){
   $('#tourName').value=S.name;
   refreshMap();buildHotspotsAndMarkers();renderRail();renderInsp();renderMap();renderDial();layout();
   if(!S.map)dbDel();
+}
+
+/* ---------- Walkthrough Tour Playback Engine ---------- */
+var wtTimer = null;
+
+async function startWalkthrough(){
+  if(!S.walkthrough.length){ toast('No walkthrough sequence built.'); return; }
+  S.walkthroughActive = true;
+  S.walkthroughStep = 0;
+  $('#walkthroughHud').hidden = false;
+  runWalkthroughStep(0);
+}
+
+function stopWalkthrough(){
+  S.walkthroughActive = false;
+  if(wtTimer) clearTimeout(wtTimer);
+  $('#walkthroughHud').hidden = true;
+  toast('Switched to free exploration mode.');
+}
+
+$('#hudExploreBtn').onclick = function(){
+  stopWalkthrough();
+};
+
+async function runWalkthroughStep(idx){
+  if(!S.walkthroughActive) return;
+  if(idx >= S.walkthrough.length){
+    toast('Walkthrough tour finished!');
+    stopWalkthrough();
+    return;
+  }
+
+  S.walkthroughStep = idx;
+  var step = S.walkthrough[idx];
+  $('#wtStepLabel').textContent = `Step ${idx + 1} of ${S.walkthrough.length}`;
+
+  var sc = getScene(step.sceneId);
+  if(sc && sc.id !== S.active){
+    applyScene(sc);
+  }
+
+  lon = step.startLon || 0;
+  lat = 0;
+  vlon = vlat = 0;
+
+  var durMs = (step.panDuration || 4) * 1000;
+  var startL = lon, endL = step.endLon || (lon + 90);
+
+  await tween(durMs, function(p){
+    if(!S.walkthroughActive) return;
+    var e = ease(p);
+    lon = startL + (endL - startL) * e;
+  });
+
+  if(!S.walkthroughActive) return;
+
+  if(step.markerId){
+    hsEls.forEach((el) => {
+      if(el._kind === 'marker' && el._h && el._h.poolId === step.markerId){
+        el.classList.add('open');
+      }
+    });
+  }
+
+  var pauseMs = (step.pauseDuration || 2) * 1000;
+  wtTimer = setTimeout(() => {
+    if(!S.walkthroughActive) return;
+    hsEls.forEach(el => el.classList.remove('open'));
+    runWalkthroughStep(idx + 1);
+  }, pauseMs);
 }
 
 /* ---------- overhead map popout drawer with responsive image scaling ---------- */
@@ -905,7 +1177,6 @@ function renderMap(){
 
   if(mapImg.getAttribute('src')!==S.map.url)mapImg.src=S.map.url;
 
-  // Calculate full container bounding dimensions to dynamically fit the image
   var bodyEl=$('#mapBody');
   var maxW=Math.max(100, bodyEl.clientWidth - 20);
   var maxH=Math.max(100, bodyEl.clientHeight - 20);
@@ -1019,7 +1290,7 @@ $('#fileMap').addEventListener('change',function(){
   im.src=url;
 });
 
-/* ---------- Export & Import Methods ---------- */
+/* ---------- Export, Import & Server Save ---------- */
 function exportProject(projectId){
   toast('Packaging project for export...');
   dbGetRawProjectRecord(projectId).then(async function(rec){
@@ -1028,13 +1299,7 @@ function exportProject(projectId){
     var mediaPromises = (rec.media||[]).map(async function(m){
       var dataUrl = await blobToDataURL(m.blob);
       return {
-        id: m.id,
-        kind: m.kind,
-        name: m.name,
-        layout: m.layout,
-        projection: m.projection,
-        thumb: m.thumb,
-        dataUrl: dataUrl
+        id: m.id, kind: m.kind, name: m.name, layout: m.layout, projection: m.projection, thumb: m.thumb, dataUrl: dataUrl
       };
     });
 
@@ -1049,6 +1314,8 @@ function exportProject(projectId){
       dial: rec.dial,
       altNames: rec.altNames,
       scenes: rec.scenes,
+      markerPool: rec.markerPool || [],
+      walkthrough: rec.walkthrough || [],
       startScreen: {
         enabled: rec.startScreen ? rec.startScreen.enabled : false,
         title: rec.startScreen ? rec.startScreen.title : '',
@@ -1075,6 +1342,53 @@ function exportProject(projectId){
     toast('Export failed.');
   });
 }
+
+function saveNow(){
+  toast('Saving project for public viewing...');
+  save();
+
+  if(!S.projectId) S.projectId = uid();
+  dbGetRawProjectRecord(S.projectId).then(async function(rec){
+    if(!rec) return;
+    try {
+      var mediaPromises = (rec.media||[]).map(async function(m){
+        var dataUrl = await blobToDataURL(m.blob);
+        return { id: m.id, kind: m.kind, name: m.name, layout: m.layout, projection: m.projection, thumb: m.thumb, dataUrl: dataUrl };
+      });
+      var mediaList = await Promise.all(mediaPromises);
+      var mapDataUrl = (rec.map && rec.map.blob) ? await blobToDataURL(rec.map.blob) : null;
+
+      var payload = {
+        projectId: S.projectId,
+        name: S.name,
+        updatedAt: Date.now(),
+        dial: S.dial,
+        altNames: S.altNames,
+        scenes: S.scenes,
+        markerPool: S.markerPool,
+        walkthrough: S.walkthrough,
+        startScreen: S.startScreen,
+        media: mediaList,
+        map: mapDataUrl ? { dataUrl: mapDataUrl, w: rec.map.w, h: rec.map.h } : null
+      };
+
+      fetch('/api/save-project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function(res){
+        if(res.ok) toast('Project saved to server for public viewing!');
+        else toast('Saved locally! (Server endpoint unavailable)');
+      }).catch(function(){
+        toast('Saved project locally for public viewing!');
+      });
+    } catch(e) {
+      toast('Saved project locally!');
+    }
+  });
+}
+
+$('#saveBtn').onclick = function(){ saveNow(); };
 
 function importProjectFile(file){
   if(!file) return;
@@ -1106,6 +1420,8 @@ function importProjectFile(file){
         dial: data.dial || 0,
         altNames: data.altNames || ['Primary', 'Alternative'],
         scenes: data.scenes || [],
+        markerPool: data.markerPool || [],
+        walkthrough: data.walkthrough || [],
         startScreen: data.startScreen || {enabled:false, title:'Welcome to the Tour', desc:''},
         media: mediaList,
         map: mapBlob ? { blob: mapBlob, w: data.map.w, h: data.map.h } : null
@@ -1240,23 +1556,32 @@ function layout(){
 $('#mEdit').onclick=function(){
   if(S.viewOnly)return;
   S.mode='edit';S.railOpen=true;S.inspOpen=window.innerWidth>900||S.inspOpen;
+  stopWalkthrough();
   $('#startScreen').hidden=true;layout();
 };
 $('#mView').onclick=function(){
   S.mode='view';cancelAdd();cancelAddMarker();S.placing=null;S.sel=null;markSel();S.railOpen=false;layout();
-  if(S.startScreen.enabled)showStartScreen();
+  showStartScreen();
 };
 
 function showStartScreen(){
   var st=$('#startScreen');
   $('#startTitle').textContent=S.startScreen.title||'Welcome to the Tour';
-  $('#startDesc').textContent=S.startScreen.desc||'';
+  $('#startDesc').textContent=S.startScreen.desc||'Choose how you would like to experience this tour.';
   var imgWrap=$('#startImgWrap'),img=$('#startImg');
   if(S.startScreen.imgUrl){img.src=S.startScreen.imgUrl;imgWrap.hidden=false}
   else{imgWrap.hidden=true}
   st.hidden=false;
 }
-$('#startTourBtn').onclick=function(){$('#startScreen').hidden=true};
+
+$('#startWalkthroughTourBtn').onclick=function(){
+  $('#startScreen').hidden=true;
+  startWalkthrough();
+};
+$('#startExploreTourBtn').onclick=function(){
+  $('#startScreen').hidden=true;
+  stopWalkthrough();
+};
 
 /* Share modal controls */
 function buildShareUrl(){
@@ -1272,7 +1597,7 @@ $('#shareBtn').onclick=function(){
 $('#closeShareBtn').onclick=function(){$('#shareModal').hidden=true};
 $('#copyShareBtn').onclick=function(){
   navigator.clipboard.writeText(buildShareUrl()).then(function(){
-    toast('View-only presentation link copied!');
+    toast('Presentation link copied!');
   });
 };
 $('#nativeShareBtn').onclick=function(){
@@ -1437,6 +1762,8 @@ function dbLoadProject(id){
     S.dial = rec.dial || 0;
     S.altNames = rec.altNames || ['Primary', 'Alternative'];
     if(rec.startScreen) S.startScreen = rec.startScreen;
+    S.markerPool = rec.markerPool || [];
+    S.walkthrough = rec.walkthrough || [];
 
     Array.from(S.media.values()).forEach(dropMedia);
     S.media.clear();
@@ -1473,6 +1800,8 @@ function save(){
       dial: S.dial,
       altNames: S.altNames,
       scenes: S.scenes,
+      markerPool: S.markerPool,
+      walkthrough: S.walkthrough,
       startScreen: S.startScreen,
       media: Array.from(S.media.values()).map(function(m){
         return {id:m.id,kind:m.kind,name:m.name,blob:m.blob,thumb:m.thumb||null,layout:m.layout||'mono',projection:m.projection||'eq360'};
@@ -1511,7 +1840,15 @@ function createDemo(){
   var im=new Image();im.src=c.toDataURL('image/jpeg',.9);
   var m={id:uid(),name:'Atrium',demo:true,w:W,h:H,kind:'photo',el:im,url:im.src,layout:'mono',projection:'eq360'};
   S.media.set(m.id,m);
-  S.scenes.push({id:id,name:'Atrium',v:[{a:m.id,b:null},null],view:null,mapPos:null,cmp:.5,hotspots:[],markers:[{id:uid(),lon:180,lat:0,name:'Feature Specimen',desc:'This marker provides details without shifting your view.'}]});
+  
+  var poolId = uid();
+  S.markerPool = [{id: poolId, name: 'Feature Specimen', desc: 'This marker provides details without shifting your view.'}];
+
+  S.scenes.push({id:id,name:'Atrium',v:[{a:m.id,b:null},null],view:null,mapPos:null,cmp:.5,hotspots:[],markers:[{id:uid(),poolId:poolId,lon:180,lat:0}]});
+  
+  S.walkthrough = [{
+    id: uid(), sceneId: id, startLon: 180, endLon: 270, panDuration: 5, pauseDuration: 3, markerId: poolId
+  }];
 }
 
 /* ---------- render loop ---------- */
@@ -1550,7 +1887,7 @@ function boot(){
     if(projects.length){
       var targetId = (reqProject && projects.some(p => p.id === reqProject)) ? reqProject : projects[0].id;
       dbLoadProject(targetId).then(function(){
-        if(S.viewOnly && S.startScreen.enabled){
+        if(S.viewOnly){
           showStartScreen();
         }
       });
@@ -1563,7 +1900,7 @@ function boot(){
 function startDemo(){
   if(S.scenes.length)return;
   createDemo();renderRail();layout();goTo(S.scenes[0].id,{instant:true});
-  if(S.viewOnly && S.startScreen.enabled){
+  if(S.viewOnly){
     showStartScreen();
   }
 }
