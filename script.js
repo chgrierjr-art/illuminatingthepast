@@ -1871,60 +1871,10 @@ function frame(){
   updateHotspots();updateVC();updateCone();
 }
 
-/* ---------- Remote .panoreel Loader ---------- */
-async function fetchPanoreel(url) {
-  try {
-    var response = await fetch(url);
-    if (!response.ok) throw new Error('HTTP error ' + response.status);
-    var data = await response.json();
-    if (!data.panoreelExport) throw new Error('Invalid .panoreel file format');
-
-    var mediaPromises = (data.media || []).map(async function(m) {
-      var blob = m.dataUrl ? await dataURLToBlob(m.dataUrl) : null;
-      return {
-        id: m.id,
-        kind: m.kind,
-        name: m.name,
-        layout: m.layout || 'mono',
-        projection: m.projection || 'eq360',
-        thumb: m.thumb || null,
-        blob: blob
-      };
-    });
-
-    var mediaList = await Promise.all(mediaPromises);
-    var mapBlob = (data.map && data.map.dataUrl) ? await dataURLToBlob(data.map.dataUrl) : null;
-
-    var newId = data.projectId || ('hosted_' + uid());
-    var rec = {
-      id: newId,
-      name: data.name || 'Hosted Tour',
-      updatedAt: Date.now(),
-      dial: data.dial || 0,
-      altNames: data.altNames || ['Primary', 'Alternative'],
-      scenes: data.scenes || [],
-      markerPool: data.markerPool || [],
-      walkthrough: data.walkthrough || [],
-      startScreen: data.startScreen || { enabled: false, title: 'Welcome to the Tour', desc: '' },
-      media: mediaList,
-      map: mapBlob ? { blob: mapBlob, w: data.map.w, h: data.map.h } : null
-    };
-
-    await dbSaveRawProjectRecord(rec);
-    await dbLoadProject(newId);
-    return true;
-  } catch (err) {
-    console.warn('Initial .panoreel fetch skipped or failed:', err);
-    return false;
-  }
-}
-
 /* ---------- boot ---------- */
 function boot(){
   var params = new URLSearchParams(window.location.search);
   var reqProject = params.get('project');
-  var tourFile = params.get('tour') || params.get('file') || 'default.panoreel';
-
   if(params.get('mode') === 'view' || params.get('view') === '1' || window.location.hash === '#view'){
     S.viewOnly = true;
     S.mode = 'view';
@@ -1933,24 +1883,18 @@ function boot(){
 
   resize();layout();renderRail();renderInsp();frame();
 
-  fetchPanoreel(tourFile).then(function(success){
-    if(success){
-      if(S.viewOnly){
-        showStartScreen();
-      }
-    } else {
-      dbGetAllProjects().then(function(projects){
-        if(projects.length){
-          var targetId = (reqProject && projects.some(p => p.id === reqProject)) ? reqProject : projects[0].id;
-          dbLoadProject(targetId).then(function(){
-            if(S.viewOnly) showStartScreen();
-          });
-        }else{
-          startDemo();
+  dbGetAllProjects().then(function(projects){
+    if(projects.length){
+      var targetId = (reqProject && projects.some(p => p.id === reqProject)) ? reqProject : projects[0].id;
+      dbLoadProject(targetId).then(function(){
+        if(S.viewOnly){
+          showStartScreen();
         }
-      }).catch(startDemo);
+      });
+    }else{
+      startDemo();
     }
-  });
+  }).catch(startDemo);
 }
 
 function startDemo(){
@@ -1961,5 +1905,4 @@ function startDemo(){
   }
 }
 boot();
-})();
 })();
