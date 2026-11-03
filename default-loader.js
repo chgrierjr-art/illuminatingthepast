@@ -106,10 +106,21 @@
     await saveProject(record);
   }
 
+  function cleanDefaultPresentationUrl() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('project') !== 'published-default' || params.get('mode') !== 'view') return;
+
+    params.delete('project');
+    params.delete('mode');
+    var query = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+  }
+
   function startApp() {
     loading.remove();
     var appScript = document.createElement('script');
     appScript.src = new URL('./script.js', document.baseURI).href;
+    appScript.onload = cleanDefaultPresentationUrl;
     appScript.onerror = function () {
       document.body.insertAdjacentHTML('beforeend', '<p style="position:fixed;z-index:100000;inset:auto 16px 16px;padding:12px;background:#300;color:#fff">The Panoreel app could not be loaded. Please reload the page.</p>');
     };
