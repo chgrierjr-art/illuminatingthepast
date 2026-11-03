@@ -80,18 +80,24 @@
     };
   }
 
-  function setDefaultProjectInUrl() {
+  function configureStartupUrl() {
     var params = new URLSearchParams(window.location.search);
-    if (!params.has('project')) {
-      params.set('project', 'published-default');
-      var query = params.toString();
-      window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+    var isEditorPath = /(?:^|\/)dev\/?$/.test(window.location.pathname);
+    var explicitView = params.get('mode') === 'view' || params.get('view') === '1' || window.location.hash === '#view';
+    var editorRequested = params.get('mode') === 'edit' || (isEditorPath && !explicitView);
+
+    if (!params.has('project')) params.set('project', 'published-default');
+    if (!params.has('mode') && params.get('view') !== '1' && window.location.hash !== '#view') {
+      params.set('mode', editorRequested ? 'edit' : 'view');
     }
+
+    var query = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
     return params.get('project') === 'published-default';
   }
 
   async function loadPublishedDefault() {
-    if (!setDefaultProjectInUrl()) return;
+    if (!configureStartupUrl()) return;
 
     var response = await fetch(new URL('./default.panoreel', document.baseURI), { cache: 'no-cache' });
     if (!response.ok) throw new Error('Could not fetch default.panoreel (' + response.status + ').');
