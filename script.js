@@ -1851,6 +1851,26 @@ function createDemo(){
   }];
 }
 
+/* ---------- render loop ---------- */
+function frame(){
+  requestAnimationFrame(frame);
+  if(!drag&&ptrs.size===0&&!S.busy&&(vlon||vlat)){
+    lon+=vlon;lat+=vlat;vlon*=.92;vlat*=.92;
+    if(Math.abs(vlon)<.002)vlon=0;if(Math.abs(vlat)<.002)vlat=0;
+  }
+  var sc=curScene();
+  if(sc){
+    if(S.pendingMap)refreshMap();
+    dispMedia(sc).forEach(function(m){
+      if(m)m._seen=performance.now();
+      if(m&&m.kind==='video'&&m.tex&&m.el.readyState>=2&&(m.demo?m._dirty:m.el.currentTime!==m._lt)){m._lt=m.el.currentTime;m._dirty=false;m.tex.needsUpdate=true}
+    });
+  }
+  updateCmp();updateCamera();renderer.render(scene3,camera);
+  if(snapReq){ghost.width=canvas.width;ghost.height=canvas.height;gctx.drawImage(canvas,0,0);snapReq(true)}
+  updateHotspots();updateVC();updateCone();
+}
+
 /* ---------- Remote .panoreel Loader ---------- */
 async function fetchPanoreel(url) {
   try {
@@ -1859,7 +1879,6 @@ async function fetchPanoreel(url) {
     var data = await response.json();
     if (!data.panoreelExport) throw new Error('Invalid .panoreel file format');
 
-    // Convert Data URLs or relative paths back into Blob objects
     var mediaPromises = (data.media || []).map(async function(m) {
       var blob = m.dataUrl ? await dataURLToBlob(m.dataUrl) : null;
       return {
@@ -1891,7 +1910,6 @@ async function fetchPanoreel(url) {
       map: mapBlob ? { blob: mapBlob, w: data.map.w, h: data.map.h } : null
     };
 
-    // Save to local IndexedDB and activate the project
     await dbSaveRawProjectRecord(rec);
     await dbLoadProject(newId);
     return true;
@@ -1901,31 +1919,10 @@ async function fetchPanoreel(url) {
   }
 }
 
-/* ---------- render loop ---------- */
-function frame(){
-  requestAnimationFrame(frame);
-  if(!drag&&ptrs.size===0&&!S.busy&&(vlon||vlat)){
-    lon+=vlon;lat+=vlat;vlon*=.92;vlat*=.92;
-    if(Math.abs(vlon)<.002)vlon=0;if(Math.abs(vlat)<.002)vlat=0;
-  }
-  var sc=curScene();
-  if(sc){
-    if(S.pendingMap)refreshMap();
-    dispMedia(sc).forEach(function(m){
-      if(m)m._seen=performance.now();
-      if(m&&m.kind==='video'&&m.tex&&m.el.readyState>=2&&(m.demo?m._dirty:m.el.currentTime!==m._lt)){m._lt=m.el.currentTime;m._dirty=false;m.tex.needsUpdate=true}
-    });
-  }
-  updateCmp();updateCamera();renderer.render(scene3,camera);
-  if(snapReq){ghost.width=canvas.width;ghost.height=canvas.height;gctx.drawImage(canvas,0,0);snapReq(true)}
-  updateHotspots();updateVC();updateCone();
-}
-
 /* ---------- boot ---------- */
 function boot(){
   var params = new URLSearchParams(window.location.search);
   var reqProject = params.get('project');
-  // Allow passing custom file via ?tour=custom.panoreel or fallback to default.panoreel
   var tourFile = params.get('tour') || params.get('file') || 'default.panoreel';
 
   if(params.get('mode') === 'view' || params.get('view') === '1' || window.location.hash === '#view'){
@@ -1936,14 +1933,12 @@ function boot(){
 
   resize();layout();renderRail();renderInsp();frame();
 
-  // Attempt to fetch hosted .panoreel file on startup
   fetchPanoreel(tourFile).then(function(success){
     if(success){
       if(S.viewOnly){
         showStartScreen();
       }
     } else {
-      // Fallback: Check local IndexedDB or load Demo scene if fetch fails
       dbGetAllProjects().then(function(projects){
         if(projects.length){
           var targetId = (reqProject && projects.some(p => p.id === reqProject)) ? reqProject : projects[0].id;
@@ -1957,3 +1952,14 @@ function boot(){
     }
   });
 }
+
+function startDemo(){
+  if(S.scenes.length)return;
+  createDemo();renderRail();layout();goTo(S.scenes[0].id,{instant:true});
+  if(S.viewOnly){
+    showStartScreen();
+  }
+}
+boot();
+})();
+})();
