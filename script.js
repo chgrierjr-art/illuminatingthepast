@@ -1851,6 +1851,56 @@ function createDemo(){
   }];
 }
 
+/* ---------- Remote .panoreel Loader ---------- */
+async function fetchPanoreel(url) {
+  try {
+    var response = await fetch(url);
+    if (!response.ok) throw new Error('HTTP error ' + response.status);
+    var data = await response.json();
+    if (!data.panoreelExport) throw new Error('Invalid .panoreel file format');
+
+    // Convert Data URLs or relative paths back into Blob objects
+    var mediaPromises = (data.media || []).map(async function(m) {
+      var blob = m.dataUrl ? await dataURLToBlob(m.dataUrl) : null;
+      return {
+        id: m.id,
+        kind: m.kind,
+        name: m.name,
+        layout: m.layout || 'mono',
+        projection: m.projection || 'eq360',
+        thumb: m.thumb || null,
+        blob: blob
+      };
+    });
+
+    var mediaList = await Promise.all(mediaPromises);
+    var mapBlob = (data.map && data.map.dataUrl) ? await dataURLToBlob(data.map.dataUrl) : null;
+
+    var newId = data.projectId || ('hosted_' + uid());
+    var rec = {
+      id: newId,
+      name: data.name || 'Hosted Tour',
+      updatedAt: Date.now(),
+      dial: data.dial || 0,
+      altNames: data.altNames || ['Primary', 'Alternative'],
+      scenes: data.scenes || [],
+      markerPool: data.markerPool || [],
+      walkthrough: data.walkthrough || [],
+      startScreen: data.startScreen || { enabled: false, title: 'Welcome to the Tour', desc: '' },
+      media: mediaList,
+      map: mapBlob ? { blob: mapBlob, w: data.map.w, h: data.map.h } : null
+    };
+
+    // Save to local IndexedDB and activate the project
+    await dbSaveRawProjectRecord(rec);
+    await dbLoadProject(newId);
+    return true;
+  } catch (err) {
+    console.warn('Initial .panoreel fetch skipped or failed:', err);
+    return false;
+  }
+}
+
 /* ---------- render loop ---------- */
 function frame(){
   requestAnimationFrame(frame);
@@ -1875,6 +1925,9 @@ function frame(){
 function boot(){
   var params = new URLSearchParams(window.location.search);
   var reqProject = params.get('project');
+  // Allow passing custom file via ?tour=custom.panoreel or fallback to default.panoreel
+  var tourFile = params.get('tour') || params.get('file') || 'default.panoreel';
+
   if(params.get('mode') === 'view' || params.get('view') === '1' || window.location.hash === '#view'){
     S.viewOnly = true;
     S.mode = 'view';
@@ -1883,26 +1936,24 @@ function boot(){
 
   resize();layout();renderRail();renderInsp();frame();
 
-  dbGetAllProjects().then(function(projects){
-    if(projects.length){
-      var targetId = (reqProject && projects.some(p => p.id === reqProject)) ? reqProject : projects[0].id;
-      dbLoadProject(targetId).then(function(){
-        if(S.viewOnly){
-          showStartScreen();
+  // Attempt to fetch hosted .panoreel file on startup
+  fetchPanoreel(tourFile).then(function(success){
+    if(success){
+      if(S.viewOnly){
+        showStartScreen();
+      }
+    } else {
+      // Fallback: Check local IndexedDB or load Demo scene if fetch fails
+      dbGetAllProjects().then(function(projects){
+        if(projects.length){
+          var targetId = (reqProject && projects.some(p => p.id === reqProject)) ? reqProject : projects[0].id;
+          dbLoadProject(targetId).then(function(){
+            if(S.viewOnly) showStartScreen();
+          });
+        }else{
+          startDemo();
         }
-      });
-    }else{
-      startDemo();
+      }).catch(startDemo);
     }
-  }).catch(startDemo);
+  });
 }
-
-function startDemo(){
-  if(S.scenes.length)return;
-  createDemo();renderRail();layout();goTo(S.scenes[0].id,{instant:true});
-  if(S.viewOnly){
-    showStartScreen();
-  }
-}
-boot();
-})();
