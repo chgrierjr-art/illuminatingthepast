@@ -7,6 +7,10 @@
   loading.style.cssText = 'position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:#080b0f;color:#fff;font:16px system-ui,sans-serif';
   document.body.appendChild(loading);
 
+  function isDevPath() {
+    return /(?:^|\/)dev\/?$/.test(window.location.pathname);
+  }
+
   function openDatabase() {
     return new Promise(function (resolve, reject) {
       var request;
@@ -82,11 +86,13 @@
 
   function configureStartupUrl() {
     var params = new URLSearchParams(window.location.search);
-    var isEditorPath = /(?:^|\/)dev\/?$/.test(window.location.pathname);
+    var isEditorPath = isDevPath();
     var explicitView = params.get('mode') === 'view' || params.get('view') === '1' || window.location.hash === '#view';
     var editorRequested = params.get('mode') === 'edit' || (isEditorPath && !explicitView);
 
-    if (!params.has('project')) params.set('project', 'published-default');
+    if (!params.has('project') && !editorRequested) {
+      params.set('project', 'published-default');
+    }
     if (!params.has('mode') && params.get('view') !== '1' && window.location.hash !== '#view') {
       params.set('mode', editorRequested ? 'edit' : 'view');
     }
