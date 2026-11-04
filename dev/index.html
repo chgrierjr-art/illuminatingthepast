@@ -15,7 +15,7 @@
     (function () {
       var params = new URLSearchParams(window.location.search);
       if (!params.has('mode')) params.set('mode', 'edit');
-      if (!params.has('project')) params.set('project', 'published-default');
+      params.set('dev', '1');
       document.getElementById('editor').src = '../?' + params.toString() + window.location.hash;
     })();
   </script>
