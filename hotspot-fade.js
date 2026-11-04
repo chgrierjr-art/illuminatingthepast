@@ -11,7 +11,7 @@
 
   var style = document.createElement('style');
   style.textContent = [
-    'body.view-only.hotspots-idle #hs .hsp { opacity: .14; transition: opacity .5s ease; }',
+    'body.view-only.hotspots-idle #hs .hsp { opacity: .12; transition: opacity .5s ease; }',
     'body.view-only.hotspots-idle #hs .hsp:hover,',
     'body.view-only.hotspots-idle #hs .hsp:focus-visible { opacity: 1; }',
     '@media (prefers-reduced-motion: reduce) { body.view-only.hotspots-idle #hs .hsp { transition: none; } }'
@@ -20,8 +20,10 @@
 
   var timer = null;
   var dragging = false;
+  var movedDuringDrag = false;
   var lastX = 0;
   var lastY = 0;
+  var wasViewer = false;
 
   function isViewer() {
     return params.get('dev') !== '1' && document.body.classList.contains('view-only');
@@ -40,9 +42,9 @@
     if (event.target.closest('.hsp')) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     dragging = true;
+    movedDuringDrag = false;
     lastX = event.clientX;
     lastY = event.clientY;
-    resetIdleTimer();
   });
 
   stage.addEventListener('pointermove', function (event) {
@@ -51,13 +53,16 @@
     var dy = event.clientY - lastY;
     lastX = event.clientX;
     lastY = event.clientY;
-    if (Math.abs(dx) + Math.abs(dy) > 2) resetIdleTimer();
+    if (Math.abs(dx) + Math.abs(dy) > 2) {
+      movedDuringDrag = true;
+      resetIdleTimer();
+    }
   });
 
   function endDrag() {
-    if (!dragging) return;
+    if (dragging && movedDuringDrag) resetIdleTimer();
     dragging = false;
-    resetIdleTimer();
+    movedDuringDrag = false;
   }
   stage.addEventListener('pointerup', endDrag);
   stage.addEventListener('pointercancel', endDrag);
@@ -75,13 +80,20 @@
 
   hotspots.addEventListener('click', resetIdleTimer);
 
+  // The app is bootstrapped asynchronously by default-loader.js. Only react to
+  // changes in viewer mode so adding/removing the idle class cannot restart the timer.
   new MutationObserver(function () {
-    if (isViewer()) resetIdleTimer();
-    else {
-      clearTimeout(timer);
-      document.body.classList.remove('hotspots-idle');
+    var viewer = isViewer();
+    if (viewer !== wasViewer) {
+      wasViewer = viewer;
+      if (viewer) resetIdleTimer();
+      else {
+        clearTimeout(timer);
+        document.body.classList.remove('hotspots-idle');
+      }
     }
   }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
-  if (isViewer()) resetIdleTimer();
+  wasViewer = isViewer();
+  if (wasViewer) resetIdleTimer();
 })();
