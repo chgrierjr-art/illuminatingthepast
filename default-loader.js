@@ -1,6 +1,12 @@
 (function () {
   'use strict';
 
+  var params = new URLSearchParams(window.location.search);
+  var isEditorPath = /(?:^|\/)dev\/?$/.test(window.location.pathname);
+  var explicitView = params.get('mode') === 'view' || params.get('view') === '1' || window.location.hash === '#view';
+  var editorRequested = params.get('mode') === 'edit' || (isEditorPath && !explicitView);
+  var isDevMode = isEditorPath && editorRequested;
+
   var loading = document.createElement('div');
   loading.setAttribute('role', 'status');
   loading.textContent = 'Loading the published tour…';
@@ -82,18 +88,14 @@
 
   function configureStartupUrl() {
     var params = new URLSearchParams(window.location.search);
-    var isEditorPath = /(?:^|\/)dev\/?$/.test(window.location.pathname);
-    var explicitView = params.get('mode') === 'view' || params.get('view') === '1' || window.location.hash === '#view';
-    var editorRequested = params.get('mode') === 'edit' || (isEditorPath && !explicitView);
-
-    if (!params.has('project')) params.set('project', 'published-default');
+    if (!params.has('project') && !isDevMode) params.set('project', 'published-default');
     if (!params.has('mode') && params.get('view') !== '1' && window.location.hash !== '#view') {
       params.set('mode', editorRequested ? 'edit' : 'view');
     }
 
     var query = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
-    return params.get('project') === 'published-default';
+    return !isDevMode && params.get('project') === 'published-default';
   }
 
   async function loadPublishedDefault() {
