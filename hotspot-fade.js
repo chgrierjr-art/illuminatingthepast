@@ -4,17 +4,20 @@
   var params = new URLSearchParams(window.location.search);
   if (params.get('dev') === '1') return;
 
-  var IDLE_DELAY = 4500;
+  var IDLE_DELAY = 3000;
+  var FADE_DURATION = '.25s';
+  var PULSE_DURATION = '2.6s';
   var stage = document.getElementById('stage');
   var hotspots = document.getElementById('hs');
   if (!stage || !hotspots) return;
 
   var style = document.createElement('style');
   style.textContent = [
-    'body.view-only.hotspots-idle #hs .hsp { opacity: .12; transition: opacity .5s ease; }',
-    'body.view-only.hotspots-idle #hs .hsp:hover,',
-    'body.view-only.hotspots-idle #hs .hsp:focus-visible { opacity: 1; }',
-    '@media (prefers-reduced-motion: reduce) { body.view-only.hotspots-idle #hs .hsp { transition: none; } }'
+    'body.view-only #hs .hsp { transition: opacity ' + FADE_DURATION + ' ease; }',
+    'body.view-only #hs .hsp .dot::after { animation: ping ' + PULSE_DURATION + ' ease-out infinite; }',
+    'body.view-only.hotspots-idle #hs .hsp { opacity: 0; pointer-events: none; }',
+    'body.view-only.hotspots-idle #hs .hsp .dot::after { animation: none; opacity: 0; }',
+    '@media (prefers-reduced-motion: reduce) { body.view-only #hs .hsp { transition: none; } }'
   ].join('\n');
   document.head.appendChild(style);
 
@@ -81,7 +84,7 @@
   hotspots.addEventListener('click', resetIdleTimer);
 
   // The app is bootstrapped asynchronously by default-loader.js. Only react to
-  // changes in viewer mode so adding/removing the idle class cannot restart the timer.
+  // changes in viewer mode so toggling the idle class cannot restart the timer.
   new MutationObserver(function () {
     var viewer = isViewer();
     if (viewer !== wasViewer) {
